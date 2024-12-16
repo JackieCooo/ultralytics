@@ -5,5 +5,6 @@ from .nas import NAS
 from .rtdetr import RTDETR
 from .sam import SAM
 from .yolo import YOLO, YOLOWorld
+from .effcientnet import EffcientNet
 
-__all__ = "YOLO", "RTDETR", "SAM", "FastSAM", "NAS", "YOLOWorld"  # allow simpler import
+__all__ = "YOLO", "RTDETR", "SAM", "FastSAM", "NAS", "YOLOWorld", "EffcientNet"  # allow simpler import

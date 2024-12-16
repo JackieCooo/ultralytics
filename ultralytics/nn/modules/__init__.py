@@ -56,6 +56,8 @@ from .block import (
     RepVGGDW,
     ResNetLayer,
     SCDown,
+    MBConv,
+    FusedMBConv,
 )
 from .conv import (
     CBAM,
@@ -156,4 +158,6 @@ __all__ = (
     "C2fCIB",
     "Attention",
     "PSA",
+    "MBConv",
+    "FusedMBConv",
 )

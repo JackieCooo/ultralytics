@@ -4,8 +4,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.ops import StochasticDepth, SqueezeExcitation
+from functools import partial
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
+from ultralytics.utils.ops import make_divisible
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
@@ -1107,3 +1110,197 @@ class SCDown(nn.Module):
     def forward(self, x):
         """Applies convolution and downsampling to the input tensor in the SCDown module."""
         return self.cv2(self.cv1(x))
+
+
+class MBConvBlock(nn.Module):
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        k: int = 1,
+        s: int = 1,
+        expand_ratio: int = 1,
+        stochastic_depth_prob: float = 0.2,
+    ):
+        super().__init__()
+        
+        layers = []
+
+        # expand
+        expanded_channels = make_divisible(c1 * expand_ratio, 8)
+        if expanded_channels != c1:
+            layers.append(
+                Conv(
+                    c1=c1,
+                    c2=expanded_channels,
+                )
+            )
+
+        # depthwise
+        layers.append(
+            Conv(
+                c1=expanded_channels,
+                c2=expanded_channels,
+                k=k,
+                s=s,
+                g=expanded_channels,
+            )
+        )
+
+        # squeeze and excitation
+        squeeze_channels = max(1, c1 // 4)
+        layers.append(
+            SqueezeExcitation(
+                expanded_channels,
+                squeeze_channels,
+                activation=partial(nn.SiLU, inplace=True)
+            )
+        )
+
+        # project
+        layers.append(
+            Conv(
+                c1=expanded_channels,
+                c2=c2,
+                act=False
+            )
+        )
+
+        self.stochastic_depth = StochasticDepth(stochastic_depth_prob, "row")
+        self.block = nn.Sequential(*layers)
+        self.shotcut = (s == 1 and c1 == c2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.stochastic_depth(self.block(x)) if self.shotcut else self.block(x)
+
+
+class MBConv(nn.Module):
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        k: int = 1,
+        s: int = 1,
+        expand_ratio: int = 1,
+        stochastic_depth_prob: float = 0.2,
+    ) -> None:
+        super().__init__()
+
+        if not (1 <= s <= 2):
+            raise ValueError("illegal stride value")
+        
+        self.num_layers = n
+        
+        self.b1 = MBConvBlock(
+            c1=c1,
+            c2=c2,
+            k=k,
+            s=s,
+            expand_ratio=expand_ratio,
+            stochastic_depth_prob=stochastic_depth_prob
+        )
+        self.b2 = nn.Sequential(*(MBConvBlock(
+            c1=c2,
+            c2=c2,
+            k=k,
+            s=1,
+            expand_ratio=expand_ratio,
+            stochastic_depth_prob=stochastic_depth_prob
+        ) for _ in range(n - 1)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.b2(self.b1(x)) if self.num_layers > 1 else self.b1(x)
+
+
+class FusedMBConvBlock(nn.Module):
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        k: int = 1,
+        s: int = 1,
+        expand_ratio: int = 1,
+        stochastic_depth_prob: float = 0.2,
+    ) -> None:
+        super().__init__()
+
+        self.shotcut = (s == 1 and c1 == c2)
+
+        layers = []
+
+        expanded_channels = make_divisible(c1 * expand_ratio, 8)
+        if expanded_channels != c1:
+            # fused expand
+            layers.append(
+                Conv(
+                    c1=c1,
+                    c2=expanded_channels,
+                    k=k,
+                    s=s,
+                )
+            )
+
+            # project
+            layers.append(
+                Conv(
+                    c1=expanded_channels,
+                    c2=c2,
+                    k=1,
+                    act=False
+                )
+            )
+        else:
+            layers.append(
+                Conv(
+                    c1=c1,
+                    c2=c2,
+                    k=k,
+                    s=s,
+                )
+            )
+
+        self.block = nn.Sequential(*layers)
+        self.stochastic_depth = StochasticDepth(stochastic_depth_prob, "row")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.stochastic_depth(self.block(x)) if self.shotcut else self.block(x)
+
+
+class FusedMBConv(nn.Module):
+    def __init__(
+        self,
+        c1: int,
+        c2: int,
+        n: int = 1,
+        k: int = 1,
+        s: int = 1,
+        expand_ratio: int = 1,
+        stochastic_depth_prob: float = 0.2,
+    ) -> None:
+        super().__init__()
+
+        if not (1 <= s <= 2):
+            raise ValueError("illegal stride value")
+
+        self.num_layers = n
+        
+        self.b1 = FusedMBConvBlock(
+            c1=c1,
+            c2=c2,
+            k=k,
+            s=s,
+            expand_ratio=expand_ratio,
+            stochastic_depth_prob=stochastic_depth_prob
+        )
+        self.b2 = nn.Sequential(*(FusedMBConvBlock(
+            c1=c2,
+            c2=c2,
+            k=k,
+            s=1,
+            expand_ratio=expand_ratio,
+            stochastic_depth_prob=stochastic_depth_prob
+        ) for _ in range(n - 1)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.b2(self.b1(x)) if self.num_layers > 1 else self.b1(x)

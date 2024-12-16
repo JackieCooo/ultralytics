@@ -61,6 +61,8 @@ from ultralytics.nn.modules import (
     Segment,
     WorldDetect,
     v10Detect,
+    MBConv,
+    FusedMBConv,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -997,6 +999,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             PSA,
             SCDown,
             C2fCIB,
+            MBConv,
+            FusedMBConv,
         }:
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
@@ -1023,6 +1027,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 C2fPSA,
                 C2fCIB,
                 C2PSA,
+                MBConv,
+                FusedMBConv,
             }:
                 args.insert(2, n)  # number of repeats
                 n = 1
@@ -1083,7 +1089,7 @@ def yaml_model_load(path):
         LOGGER.warning(f"WARNING ⚠️ Ultralytics YOLO P6 models now use -p6 suffix. Renaming {path.stem} to {new_stem}.")
         path = path.with_name(new_stem + path.suffix)
 
-    unified_path = re.sub(r"(\d+)([nslmx])(.+)?$", r"\1\3", str(path))  # i.e. yolov8x.yaml -> yolov8.yaml
+    unified_path = re.sub(r"(\d+)_?([nslmx]|b\d+)(.+)?$", r"\1\3", str(path))  # i.e. yolov8x.yaml -> yolov8.yaml
     yaml_file = check_yaml(unified_path, hard=False) or check_yaml(path)
     d = yaml_load(yaml_file)  # model dict
     d["scale"] = guess_model_scale(path)
@@ -1103,8 +1109,15 @@ def guess_model_scale(model_path):
     Returns:
         (str): The size character of the model's scale, which can be n, s, m, l, or x.
     """
+    name = Path(model_path).stem
+    result = (
+        re.search(r"yolo[v]?\d+([nslmx])", name) or  # YOLO
+        re.search(r"efficientnetv1_(b[0-7])", name) or  # EfficientNetV1
+        re.search(r"efficientnetv2_([sml])", name)  # vEfficientNetV2
+    )
+
     try:
-        return re.search(r"yolo[v]?\d+([nslmx])", Path(model_path).stem).group(1)  # noqa, returns n, s, m, l, or x
+        return result.group(1)
     except AttributeError:
         return ""
 

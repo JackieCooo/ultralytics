@@ -1,0 +1,17 @@
+nc: 1000 # number of classes
+scales:
+  # [depth, width, max_channels]
+  s: [1.0, 1.0, 1280]
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [24, 3, 2]]
+  - [-1, 2, FusedMBConv, [24, 3, 1, 1]]
+  - [-1, 4, FusedMBConv, [48, 3, 2, 4]]
+  - [-1, 4, FusedMBConv, [64, 3, 2, 4]]
+  - [-1, 6, MBConv, [128, 3, 2, 4]]
+  - [-1, 9, MBConv, [160, 3, 1, 6]]
+  - [-1, 15, MBConv, [256, 3, 2, 6]]
+
+head:
+  - [-1, 1, Classify, [nc]] # Classify
