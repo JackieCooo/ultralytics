@@ -19,6 +19,7 @@ PaddlePaddle            | `paddle`                  | yolo11n_paddle_model/
 MNN                     | `mnn`                     | yolo11n.mnn
 NCNN                    | `ncnn`                    | yolo11n_ncnn_model/
 IMX                     | `imx`                     | yolo11n_imx_model/
+RKNN                    | `rknn`                    | yolo11n.rknn
 
 Requirements:
     $ pip install "ultralytics[export]"
@@ -46,6 +47,7 @@ Inference:
                          yolo11n.mnn                # MNN
                          yolo11n_ncnn_model         # NCNN
                          yolo11n_imx_model          # IMX
+                         yolo11n.rknn               # RKNN
 
 TensorFlow.js:
     $ cd .. && git clone https://github.com/zldrobit/tfjs-yolov5-example.git && cd tfjs-yolov5-example
@@ -116,6 +118,7 @@ def export_formats():
         ["MNN", "mnn", ".mnn", True, True],
         ["NCNN", "ncnn", "_ncnn_model", True, True],
         ["IMX", "imx", "_imx_model", True, True],
+        ["RKNN", "rknn", ".rknn", True, True],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU"], zip(*x)))
 
@@ -210,6 +213,7 @@ class Exporter:
             mnn,
             ncnn,
             imx,
+            rknn,
         ) = flags  # export booleans
         is_tf_format = any((saved_model, pb, tflite, edgetpu, tfjs))
 
@@ -382,6 +386,8 @@ class Exporter:
             f[12], _ = self.export_ncnn()
         if imx:
             f[13], _ = self.export_imx()
+        if rknn:
+            f[14], _ = self.export_rknn()
 
         # Finish
         f = [str(x) for x in f if x]  # filter out '' and None
@@ -1230,6 +1236,52 @@ class Exporter:
         # Needed for imx models.
         with open(f / "labels.txt", "w") as file:
             file.writelines([f"{name}\n" for _, name in self.model.names.items()])
+
+        return f, None
+
+    @try_export
+    def export_rknn(self, prefix=colorstr("RKNN:")):
+        # Export to ONNX
+        self.args.simplify = True
+        f_onnx, _ = self.export_onnx()
+
+        # Export to RKNN
+        from rknn.api import RKNN
+        LOGGER.info(f"\n{prefix} starting export with RKNN...")
+        
+        # Create RKNN object
+        rknn = RKNN(verbose=False)
+
+        # Pre-process config
+        rknn.config(mean_values=[[0, 0, 0]], std_values=[[255, 255, 255]], target_platform=self.args.platform)
+        LOGGER.info(f"{prefix} RKNN target platform is {self.args.platform}")
+
+        # Load model
+        ret = rknn.load_onnx(model=f_onnx)
+        if ret != 0:
+            LOGGER.error('Load model failed!', exc_info=ret)
+
+        # Build model
+        quant = self.args.data is not None
+        ret = rknn.build(do_quantization=quant, dataset=self.args.data)
+        if ret != 0:
+            LOGGER.error('Build model failed!', exc_info=ret)
+
+        # Export rknn model
+        if quant:
+            if self.args.platform in ['rk1808', 'rv1109', 'rv1126']:
+                f = str(self.file.with_stem(self.file.stem + '_u8').with_suffix(".rknn"))
+            else:
+                f = str(self.file.with_stem(self.file.stem + '_i8').with_suffix(".rknn"))
+        else:
+            f = str(self.file.with_stem(self.file.stem + '_f32').with_suffix(".rknn"))
+
+        ret = rknn.export_rknn(f)
+        if ret != 0:
+            LOGGER.error('Export rknn model failed!', exc_info=ret)
+        
+        # Release
+        rknn.release()
 
         return f, None
 
