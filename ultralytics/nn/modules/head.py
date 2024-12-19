@@ -67,10 +67,7 @@ class Detect(nn.Module):
             y = []
             for i in range(self.nl):
                 y.append(self.cv2[i](x[i]))  # bbox
-                cls = torch.sigmoid(self.cv3[i](x[i]))
-                cls_sum = torch.clamp(cls.sum(1, keepdim=True), 0, 1)
-                y.append(cls)  # class score
-                y.append(cls_sum)  # class score sum
+                y.append(torch.sigmoid(self.cv3[i](x[i])))  # class score
             return y
 
         if self.end2end:
