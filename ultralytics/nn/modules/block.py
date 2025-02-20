@@ -1,14 +1,11 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Block modules."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.ops import StochasticDepth, SqueezeExcitation
-from functools import partial
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
-from ultralytics.utils.ops import make_divisible
 
 from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
@@ -52,6 +49,7 @@ __all__ = (
     "Attention",
     "PSA",
     "SCDown",
+    "TorchVision",
 )
 
 
@@ -1112,195 +1110,47 @@ class SCDown(nn.Module):
         return self.cv2(self.cv1(x))
 
 
-class MBConvBlock(nn.Module):
-    def __init__(
-        self,
-        c1: int,
-        c2: int,
-        k: int = 1,
-        s: int = 1,
-        expand_ratio: int = 1,
-        stochastic_depth_prob: float = 0.2,
-    ):
+class TorchVision(nn.Module):
+    """
+    TorchVision module to allow loading any torchvision model.
+
+    This class provides a way to load a model from the torchvision library, optionally load pre-trained weights, and customize the model by truncating or unwrapping layers.
+
+    Attributes:
+        m (nn.Module): The loaded torchvision model, possibly truncated and unwrapped.
+
+    Args:
+        model (str): Name of the torchvision model to load.
+        weights (str, optional): Pre-trained weights to load. Default is "DEFAULT".
+        unwrap (bool, optional): If True, unwraps the model to a sequential containing all but the last `truncate` layers. Default is True.
+        truncate (int, optional): Number of layers to truncate from the end if `unwrap` is True. Default is 2.
+        split (bool, optional): Returns output from intermediate child modules as list. Default is False.
+    """
+
+    def __init__(self, model, weights="DEFAULT", unwrap=True, truncate=2, split=False):
+        """Load the model and weights from torchvision."""
+        import torchvision  # scope for faster 'import ultralytics'
+
         super().__init__()
-        
-        layers = []
-
-        # expand
-        expanded_channels = make_divisible(c1 * expand_ratio, 8)
-        if expanded_channels != c1:
-            layers.append(
-                Conv(
-                    c1=c1,
-                    c2=expanded_channels,
-                )
-            )
-
-        # depthwise
-        layers.append(
-            Conv(
-                c1=expanded_channels,
-                c2=expanded_channels,
-                k=k,
-                s=s,
-                g=expanded_channels,
-            )
-        )
-
-        # squeeze and excitation
-        squeeze_channels = max(1, c1 // 4)
-        layers.append(
-            SqueezeExcitation(
-                expanded_channels,
-                squeeze_channels,
-                activation=partial(nn.SiLU, inplace=True)
-            )
-        )
-
-        # project
-        layers.append(
-            Conv(
-                c1=expanded_channels,
-                c2=c2,
-                act=False
-            )
-        )
-
-        self.stochastic_depth = StochasticDepth(stochastic_depth_prob, "row")
-        self.block = nn.Sequential(*layers)
-        self.shotcut = (s == 1 and c1 == c2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.stochastic_depth(self.block(x)) if self.shotcut else self.block(x)
-
-
-class MBConv(nn.Module):
-    def __init__(
-        self,
-        c1: int,
-        c2: int,
-        n: int = 1,
-        k: int = 1,
-        s: int = 1,
-        expand_ratio: int = 1,
-        stochastic_depth_prob: float = 0.2,
-    ) -> None:
-        super().__init__()
-
-        if not (1 <= s <= 2):
-            raise ValueError("illegal stride value")
-        
-        self.num_layers = n
-        
-        self.b1 = MBConvBlock(
-            c1=c1,
-            c2=c2,
-            k=k,
-            s=s,
-            expand_ratio=expand_ratio,
-            stochastic_depth_prob=stochastic_depth_prob
-        )
-        self.b2 = nn.Sequential(*(MBConvBlock(
-            c1=c2,
-            c2=c2,
-            k=k,
-            s=1,
-            expand_ratio=expand_ratio,
-            stochastic_depth_prob=stochastic_depth_prob
-        ) for _ in range(n - 1)))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.b2(self.b1(x)) if self.num_layers > 1 else self.b1(x)
-
-
-class FusedMBConvBlock(nn.Module):
-    def __init__(
-        self,
-        c1: int,
-        c2: int,
-        k: int = 1,
-        s: int = 1,
-        expand_ratio: int = 1,
-        stochastic_depth_prob: float = 0.2,
-    ) -> None:
-        super().__init__()
-
-        self.shotcut = (s == 1 and c1 == c2)
-
-        layers = []
-
-        expanded_channels = make_divisible(c1 * expand_ratio, 8)
-        if expanded_channels != c1:
-            # fused expand
-            layers.append(
-                Conv(
-                    c1=c1,
-                    c2=expanded_channels,
-                    k=k,
-                    s=s,
-                )
-            )
-
-            # project
-            layers.append(
-                Conv(
-                    c1=expanded_channels,
-                    c2=c2,
-                    k=1,
-                    act=False
-                )
-            )
+        if hasattr(torchvision.models, "get_model"):
+            self.m = torchvision.models.get_model(model, weights=weights)
         else:
-            layers.append(
-                Conv(
-                    c1=c1,
-                    c2=c2,
-                    k=k,
-                    s=s,
-                )
-            )
+            self.m = torchvision.models.__dict__[model](pretrained=bool(weights))
+        if unwrap:
+            layers = list(self.m.children())
+            if isinstance(layers[0], nn.Sequential):  # Second-level for some models like EfficientNet, Swin
+                layers = [*list(layers[0].children()), *layers[1:]]
+            self.m = nn.Sequential(*(layers[:-truncate] if truncate else layers))
+            self.split = split
+        else:
+            self.split = False
+            self.m.head = self.m.heads = nn.Identity()
 
-        self.block = nn.Sequential(*layers)
-        self.stochastic_depth = StochasticDepth(stochastic_depth_prob, "row")
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.stochastic_depth(self.block(x)) if self.shotcut else self.block(x)
-
-
-class FusedMBConv(nn.Module):
-    def __init__(
-        self,
-        c1: int,
-        c2: int,
-        n: int = 1,
-        k: int = 1,
-        s: int = 1,
-        expand_ratio: int = 1,
-        stochastic_depth_prob: float = 0.2,
-    ) -> None:
-        super().__init__()
-
-        if not (1 <= s <= 2):
-            raise ValueError("illegal stride value")
-
-        self.num_layers = n
-        
-        self.b1 = FusedMBConvBlock(
-            c1=c1,
-            c2=c2,
-            k=k,
-            s=s,
-            expand_ratio=expand_ratio,
-            stochastic_depth_prob=stochastic_depth_prob
-        )
-        self.b2 = nn.Sequential(*(FusedMBConvBlock(
-            c1=c2,
-            c2=c2,
-            k=k,
-            s=1,
-            expand_ratio=expand_ratio,
-            stochastic_depth_prob=stochastic_depth_prob
-        ) for _ in range(n - 1)))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.b2(self.b1(x)) if self.num_layers > 1 else self.b1(x)
+    def forward(self, x):
+        """Forward pass through the model."""
+        if self.split:
+            y = [x]
+            y.extend(m(y[-1]) for m in self.m)
+        else:
+            y = self.m(x)
+        return y
