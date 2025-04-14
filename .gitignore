@@ -146,6 +146,7 @@ runs/
 wandb/
 .DS_Store
 assets/
+example.py
 
 # Neural Network weights -----------------------------------------------------------------------------------------------
 weights/
