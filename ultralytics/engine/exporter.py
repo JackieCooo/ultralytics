@@ -1117,7 +1117,12 @@ class Exporter:
         export_path.mkdir(exist_ok=True)
 
         rknn = RKNN(verbose=False)
-        rknn.config(mean_values=[[0, 0, 0]], std_values=[[255, 255, 255]], target_platform=self.args.name)
+        rknn.config(
+            mean_values=[[0, 0, 0]],
+            std_values=[[255, 255, 255]],
+            target_platform=self.args.name,
+            quantized_algorithm=self.args.quantized_algorithm
+        )
         rknn.load_onnx(model=f)
         quant = self.args.data is not None
         rknn.build(do_quantization=quant, dataset=self.args.data)
