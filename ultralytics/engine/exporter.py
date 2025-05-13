@@ -1122,7 +1122,8 @@ class Exporter:
             mean_values=[[0, 0, 0]],
             std_values=[[255, 255, 255]],
             target_platform=self.args.name,
-            quantized_algorithm=self.args.quantized_algorithm
+            quantized_algorithm=self.args.quantized_algorithm,
+            quantized_dtype=self.args.quantized_dtype
         )
         rknn.load_onnx(model=f)
         quant = self.args.data is not None

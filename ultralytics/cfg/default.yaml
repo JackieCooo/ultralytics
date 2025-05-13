@@ -86,7 +86,8 @@ simplify: True # (bool) ONNX: simplify model using `onnxslim`
 opset: # (int, optional) ONNX: opset version
 workspace: None # (float, optional) TensorRT: workspace size (GiB), `None` will let TensorRT auto-allocate memory
 nms: False # (bool) CoreML: add NMS
-quantized_algorithm: normal # (str) RKNN: quantize algorithm (normal, mmse, kl_divergence, gdq)
+quantized_algorithm: normal # (str) RKNN: quantize algorithm choices=[normal, mmse, kl_divergence, gdq (only for w4a16 and w8a16)]
+quantized_dtype: w8a8 # (str) RKNN: quantize data type choices=[w8a8 (except for RK2118), w4a16 (only for RK3576/RV1126B), w8a16 (only for RK3562), w4a8 (not support), w16a16i (only for RV1103/RV1106), w16a16i_dfp (only for RV1103/RV1106)]
 
 # Hyperparameters ------------------------------------------------------------------------------------------------------
 lr0: 0.01 # (float) initial learning rate (i.e. SGD=1E-2, Adam=1E-3)
