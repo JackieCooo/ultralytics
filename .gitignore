@@ -152,6 +152,7 @@ example.py
 weights/
 *.weights
 *.pt
+*.ts
 *.pb
 *.onnx
 *.engine
