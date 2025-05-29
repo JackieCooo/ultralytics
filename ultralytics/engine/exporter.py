@@ -1125,7 +1125,8 @@ class Exporter:
             std_values=[[255, 255, 255]],
             target_platform=self.args.name,
             quantized_algorithm=self.args.quantized_algorithm,
-            quantized_dtype=self.args.quantized_dtype
+            quantized_dtype=self.args.quantized_dtype,
+            quantized_method=self.args.quantized_method
         )
         rknn.load_onnx(model=f)
         quant = self.args.data is not None
@@ -1133,7 +1134,7 @@ class Exporter:
         filename = f"{Path(f).stem}-{self.args.name}.rknn"
         rknn.export_rknn(f"{export_path / filename}")
         rknn.release()
-        return export_path, None
+        return f"{export_path / filename}", None
 
     @try_export
     def export_imx(self, prefix=colorstr("IMX:")):
