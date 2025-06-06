@@ -309,7 +309,7 @@ def smooth_bce(eps: float = 0.1) -> Tuple[float, float]:
     return 1.0 - 0.5 * eps, 0.5 * eps
 
 
-class ConfusionMatrix:
+class ConfusionMatrix(DataExportMixin):
     """
     A class for calculating and updating a confusion matrix for object detection and classification tasks.
 
@@ -321,7 +321,7 @@ class ConfusionMatrix:
         iou_thres (float): The Intersection over Union threshold.
     """
 
-    def __init__(self, nc: int, conf: float = 0.25, iou_thres: float = 0.45, task: str = "detect"):
+    def __init__(self, nc: int, conf: float = 0.25, iou_thres: float = 0.45, names: tuple = (), task: str = "detect"):
         """
         Initialize a ConfusionMatrix instance.
 
@@ -329,11 +329,13 @@ class ConfusionMatrix:
             nc (int): Number of classes.
             conf (float, optional): Confidence threshold for detections.
             iou_thres (float, optional): IoU threshold for matching detections to ground truth.
+            names (tuple, optional): Names of classes, used as labels on the plot.
             task (str, optional): Type of task, either 'detect' or 'classify'.
         """
         self.task = task
         self.matrix = np.zeros((nc + 1, nc + 1)) if self.task == "detect" else np.zeros((nc, nc))
         self.nc = nc  # number of classes
+        self.names = list(names)  # name of classes
         self.conf = 0.25 if conf in {None, 0.001} else conf  # apply 0.25 if default val conf is passed
         self.iou_thres = iou_thres
 
@@ -426,14 +428,13 @@ class ConfusionMatrix:
 
     @TryExcept(msg="ConfusionMatrix plot failure")
     @plt_settings()
-    def plot(self, normalize: bool = True, save_dir: str = "", names: tuple = (), on_plot=None):
+    def plot(self, normalize: bool = True, save_dir: str = "", on_plot=None):
         """
         Plot the confusion matrix using matplotlib and save it to a file.
 
         Args:
             normalize (bool, optional): Whether to normalize the confusion matrix.
             save_dir (str, optional): Directory where the plot will be saved.
-            names (tuple, optional): Names of classes, used as labels on the plot.
             on_plot (callable, optional): An optional callback to pass plots path and data when they are rendered.
         """
         import matplotlib.pyplot as plt  # scope for faster 'import ultralytics'
@@ -441,18 +442,17 @@ class ConfusionMatrix:
         array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
         array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
 
-        names = list(names)
         fig, ax = plt.subplots(1, 1, figsize=(12, 9))
         if self.nc >= 100:  # downsample for large class count
             k = max(2, self.nc // 60)  # step size for downsampling, always > 1
             keep_idx = slice(None, None, k)  # create slice instead of array
-            names = names[keep_idx]  # slice class names
+            self.names = self.names[keep_idx]  # slice class names
             array = array[keep_idx, :][:, keep_idx]  # slice matrix rows and cols
             n = (self.nc + k - 1) // k  # number of retained classes
             nc = nn = n if self.task == "classify" else n + 1  # adjust for background if needed
         else:
             nc = nn = self.nc if self.task == "classify" else self.nc + 1
-        ticklabels = (names + ["background"]) if (0 < nn < 99) and (nn == nc) else "auto"
+        ticklabels = (self.names + ["background"]) if (0 < nn < 99) and (nn == nc) else "auto"
         xy_ticks = np.arange(len(ticklabels))
         tick_fontsize = max(6, 15 - 0.1 * nc)  # Minimum size is 6
         label_fontsize = max(6, 12 - 0.1 * nc)
@@ -504,6 +504,42 @@ class ConfusionMatrix:
         """Print the confusion matrix to the console."""
         for i in range(self.matrix.shape[0]):
             LOGGER.info(" ".join(map(str, self.matrix[i])))
+
+    def summary(self, normalize: bool = False, decimals: int = 5) -> List[Dict[str, float]]:
+        """
+        Generate a summarized representation of the confusion matrix as a list of dictionaries, with optional
+        normalization. This is useful for exporting the matrix to various formats such as CSV, XML, HTML, JSON, or SQL.
+
+        Args:
+            normalize (bool): Whether to normalize the confusion matrix values.
+            decimals (int): Number of decimal places to round the output values to.
+
+        Returns:
+            (List[Dict[str, float]]): A list of dictionaries, each representing one predicted class with corresponding values for all actual classes.
+
+        Examples:
+            >>> results = model.val(data="coco8.yaml", plots=True)
+            >>> cm_dict = results.confusion_matrix.summary(normalize=True, decimals=5)
+            >>> print(cm_dict)
+        """
+        import re
+
+        names = self.names if self.task == "classify" else self.names + ["background"]
+        clean_names, seen = [], set()
+        for name in names:
+            clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            original_clean = clean_name
+            counter = 1
+            while clean_name.lower() in seen:
+                clean_name = f"{original_clean}_{counter}"
+                counter += 1
+            seen.add(clean_name.lower())
+            clean_names.append(clean_name)
+        array = (self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)).round(decimals)
+        return [
+            dict({"Predicted": clean_names[i]}, **{clean_names[j]: array[i, j] for j in range(len(clean_names))})
+            for i in range(len(clean_names))
+        ]
 
 
 def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
@@ -1003,12 +1039,27 @@ class DetMetrics(SimpleClass, DataExportMixin):
         """Return dictionary of computed performance metrics and statistics."""
         return self.box.curves_results
 
-    def summary(self, **kwargs) -> List[Dict[str, Union[str, float]]]:
-        """Return per-class detection metrics with shared scalar values included."""
+    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Union[str, float]]]:
+        """
+        Generate a summarized representation of per-class detection metrics as a list of dictionaries. Includes shared
+        scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
+
+        Args:
+           normalize (bool): For Detect metrics, everything is normalized  by default [0-1].
+           decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+           (List[Dict[str, Union[str, float]]]): A list of dictionaries, each representing one class with corresponding metric values.
+
+        Examples:
+           >>> results = model.val(data="coco8.yaml")
+           >>> detection_summary = results.summary()
+           >>> print(detection_summary)
+        """
         scalars = {
-            "box-map": self.box.map,
-            "box-map50": self.box.map50,
-            "box-map75": self.box.map75,
+            "box-map": round(self.box.map, decimals),
+            "box-map50": round(self.box.map50, decimals),
+            "box-map75": round(self.box.map75, decimals),
         }
         per_class = {
             "box-p": self.box.p,
@@ -1016,11 +1067,7 @@ class DetMetrics(SimpleClass, DataExportMixin):
             "box-f1": self.box.f1,
         }
         return [
-            {
-                "class_name": self.names[i] if hasattr(self, "names") and i in self.names else str(i),
-                **{k: v[i] for k, v in per_class.items()},
-                **scalars,
-            }
+            {"class_name": self.names[i], **{k: round(v[i], decimals) for k, v in per_class.items()}, **scalars}
             for i in range(len(next(iter(per_class.values()), [])))
         ]
 
@@ -1164,15 +1211,30 @@ class SegmentMetrics(SimpleClass, DataExportMixin):
         """Return dictionary of computed performance metrics and statistics."""
         return self.box.curves_results + self.seg.curves_results
 
-    def summary(self, **kwargs) -> List[Dict[str, Union[str, float]]]:
-        """Return per-class segmentation metrics with shared scalar values included (box + mask)."""
+    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Union[str, float]]]:
+        """
+        Generate a summarized representation of per-class segmentation metrics as a list of dictionaries. Includes both
+        box and mask scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
+
+        Args:
+            normalize (bool): For Segment metrics, everything is normalized  by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (List[Dict[str, Union[str, float]]]): A list of dictionaries, each representing one class with corresponding metric values.
+
+        Examples:
+            >>> results = model.val(data="coco8-seg.yaml")
+            >>> seg_summary = results.summary(decimals=4)
+            >>> print(seg_summary)
+        """
         scalars = {
-            "box-map": self.box.map,
-            "box-map50": self.box.map50,
-            "box-map75": self.box.map75,
-            "mask-map": self.seg.map,
-            "mask-map50": self.seg.map50,
-            "mask-map75": self.seg.map75,
+            "box-map": round(self.box.map, decimals),
+            "box-map50": round(self.box.map50, decimals),
+            "box-map75": round(self.box.map75, decimals),
+            "mask-map": round(self.seg.map, decimals),
+            "mask-map50": round(self.seg.map50, decimals),
+            "mask-map75": round(self.seg.map75, decimals),
         }
         per_class = {
             "box-p": self.box.p,
@@ -1183,7 +1245,7 @@ class SegmentMetrics(SimpleClass, DataExportMixin):
             "mask-f1": self.seg.f1,
         }
         return [
-            {"class_name": self.names[i], **{k: v[i] for k, v in per_class.items()}, **scalars}
+            {"class_name": self.names[i], **{k: round(v[i], decimals) for k, v in per_class.items()}, **scalars}
             for i in range(len(next(iter(per_class.values()), [])))
         ]
 
@@ -1327,15 +1389,30 @@ class PoseMetrics(SegmentMetrics):
         """Return dictionary of computed performance metrics and statistics."""
         return self.box.curves_results + self.pose.curves_results
 
-    def summary(self, **kwargs) -> List[Dict[str, Union[str, float]]]:
-        """Return per-class pose metrics with shared scalar values included (box + pose)."""
+    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Union[str, float]]]:
+        """
+        Generate a summarized representation of per-class pose metrics as a list of dictionaries. Includes both box and
+        pose scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
+
+        Args:
+            normalize (bool): For Pose metrics, everything is normalized  by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (List[Dict[str, Union[str, float]]]): A list of dictionaries, each representing one class with corresponding metric values.
+
+        Examples:
+            >>> results = model.val(data="coco8-pose.yaml")
+            >>> pose_summary = results.summary(decimals=4)
+            >>> print(pose_summary)
+        """
         scalars = {
-            "box-map": self.box.map,
-            "box-map50": self.box.map50,
-            "box-map75": self.box.map75,
-            "pose-map": self.pose.map,
-            "pose-map50": self.pose.map50,
-            "pose-map75": self.pose.map75,
+            "box-map": round(self.box.map, decimals),
+            "box-map50": round(self.box.map50, decimals),
+            "box-map75": round(self.box.map75, decimals),
+            "pose-map": round(self.pose.map, decimals),
+            "pose-map50": round(self.pose.map50, decimals),
+            "pose-map75": round(self.pose.map75, decimals),
         }
         per_class = {
             "box-p": self.box.p,
@@ -1346,7 +1423,7 @@ class PoseMetrics(SegmentMetrics):
             "pose-f1": self.pose.f1,
         }
         return [
-            {"class_name": self.names[i], **{k: v[i] for k, v in per_class.items()}, **scalars}
+            {"class_name": self.names[i], **{k: round(v[i], decimals) for k, v in per_class.items()}, **scalars}
             for i in range(len(next(iter(per_class.values()), [])))
         ]
 
@@ -1407,9 +1484,23 @@ class ClassifyMetrics(SimpleClass, DataExportMixin):
         """Return a list of curves for accessing specific metrics curves."""
         return []
 
-    def summary(self, **kwargs) -> List[Dict[str, float]]:
-        """Return a single-row summary for classification metrics (top1/top5)."""
-        return [{"classify-top1": self.top1, "classify-top5": self.top5}]
+    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, float]]:
+        """
+        Generate a single-row summary of classification metrics (Top-1 and Top-5 accuracy).
+
+        Args:
+            normalize (bool): For Classify metrics, everything is normalized  by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (List[Dict[str, float]]): A list with one dictionary containing Top-1 and Top-5 classification accuracy.
+
+        Examples:
+            >>> results = model.val(data="imagenet10")
+            >>> classify_summary = results.summary(decimals=4)
+            >>> print(classify_summary)
+        """
+        return [{"classify-top1": round(self.top1, decimals), "classify-top5": round(self.top5, decimals)}]
 
 
 class OBBMetrics(SimpleClass, DataExportMixin):
@@ -1511,15 +1602,30 @@ class OBBMetrics(SimpleClass, DataExportMixin):
         """Return a list of curves for accessing specific metrics curves."""
         return []
 
-    def summary(self, **kwargs) -> List[Dict[str, Union[str, float]]]:
-        """Return per-class detection metrics with shared scalar values included."""
+    def summary(self, normalize: bool = True, decimals: int = 5) -> List[Dict[str, Union[str, float]]]:
+        """
+        Generate a summarized representation of per-class detection metrics as a list of dictionaries. Includes shared
+        scalar metrics (mAP, mAP50, mAP75) along with precision, recall, and F1-score for each class.
+
+        Args:
+            normalize (bool): For OBB metrics, everything is normalized  by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (List[Dict[str, Union[str, float]]]): A list of dictionaries, each representing one class with detection metrics.
+
+        Examples:
+            >>> results = model.val(data="dota8.yaml")
+            >>> detection_summary = results.summary(decimals=4)
+            >>> print(detection_summary)
+        """
         scalars = {
-            "box-map": self.box.map,
-            "box-map50": self.box.map50,
-            "box-map75": self.box.map75,
+            "box-map": round(self.box.map, decimals),
+            "box-map50": round(self.box.map50, decimals),
+            "box-map75": round(self.box.map75, decimals),
         }
         per_class = {"box-p": self.box.p, "box-r": self.box.r, "box-f1": self.box.f1}
         return [
-            {"class_name": self.names[i], **{k: v[i] for k, v in per_class.items()}, **scalars}
+            {"class_name": self.names[i], **{k: round(v[i], decimals) for k, v in per_class.items()}, **scalars}
             for i in range(len(next(iter(per_class.values()), [])))
         ]
