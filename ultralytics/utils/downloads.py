@@ -252,7 +252,7 @@ def get_google_drive_file_info(link: str) -> tuple[str, str | None]:
         >>> link = "https://drive.google.com/file/d/1cqT-cJgANNrhIHCrEufUYhQ4RqiWG_lJ/view?usp=drive_link"
         >>> url, filename = get_google_drive_file_info(link)
     """
-    import requests  # slow import
+    import requests  # scoped as slow import
 
     file_id = link.split("/d/")[1].split("/view", 1)[0]
     drive_url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -411,12 +411,12 @@ def get_github_assets(
 
     Returns:
         tag (str): The release tag.
-        assets (List[str]): A list of asset names.
+        assets (list[str]): A list of asset names.
 
     Examples:
         >>> tag, assets = get_github_assets(repo="ultralytics/assets", version="latest")
     """
-    import requests  # slow import
+    import requests  # scoped as slow import
 
     if version != "latest":
         version = f"tags/{version}"  # i.e. tags/v6.2
@@ -503,7 +503,7 @@ def download(
     Supports concurrent downloads if multiple threads are specified.
 
     Args:
-        url (str | List[str]): The URL or list of URLs of the files to be downloaded.
+        url (str | list[str]): The URL or list of URLs of the files to be downloaded.
         dir (Path, optional): The directory where the files will be saved.
         unzip (bool, optional): Flag to unzip the files after downloading.
         delete (bool, optional): Flag to delete the zip files after extraction.
