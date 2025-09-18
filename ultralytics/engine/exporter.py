@@ -1148,7 +1148,7 @@ class Exporter:
         from rknn.api import RKNN
 
         f = self.export_onnx()
-        export_path = Path(f"{Path(f).stem}_rknn_model")
+        export_path = Path(f).with_name(f"{Path(f).stem}_rknn_model")
         export_path.mkdir(exist_ok=True)
 
         rknn = RKNN(verbose=False)
@@ -1156,17 +1156,19 @@ class Exporter:
             mean_values=[[0, 0, 0]],
             std_values=[[255, 255, 255]],
             target_platform=self.args.name,
-            quantized_algorithm=self.args.quantized_algorithm,
-            quantized_dtype=self.args.quantized_dtype,
-            quantized_method=self.args.quantized_method
+            quantized_algorithm=self.args.quant_algo,
+            quantized_dtype=self.args.quant_dtype,
+            quantized_method=self.args.quant_method
         )
+
         rknn.load_onnx(model=f)
         quant = self.args.data is not None
         rknn.build(do_quantization=quant, dataset=self.args.data)
         filename = f"{Path(f).stem}-{self.args.name}.rknn"
         rknn.export_rknn(f"{export_path / filename}")
         rknn.release()
-        return f"{export_path / filename}", None
+
+        return f"{export_path / filename}"
 
     @try_export
     def export_imx(self, prefix=colorstr("IMX:")):

@@ -89,9 +89,9 @@ simplify: True # (bool) ONNX/engine only; run graph simplifier for cleaner ONNX 
 opset: # (int, optional) ONNX/engine only; opset version for export; leave unset to use a tested default
 workspace: # (float, optional) engine (TensorRT) only; workspace size in GiB, e.g. 4
 nms: False # (bool) fuse NMS into exported model when backend supports; if True, conf/iou apply (agnostic_nms except coreml)
-quantized_algorithm: normal # (str) RKNN: quantize algorithm, choices=[normal, mmse, kl_divergence, gdq (only when quantized_dtype=w4a16/w8a16)]
-quantized_dtype: w8a8 # (str) RKNN: quantize data type, choices=[w8a8 (except for RK2118), w4a16 (only for RK3576/RV1126B), w8a16 (only for RK3562), w4a8 (not support), w16a16i (only for RV1103/RV1106), w16a16i_dfp (only for RV1103/RV1106)]
-quantized_method: channel # (str) RKNN: quantize method, choices=[channel, layer, group32/64/128/256 (only when quantized_dtype=w4a16)]
+quant_algo: normal # (str) RKNN: quantize algorithm, choices=[normal, mmse, kl_divergence, gdq (only when quantized_dtype=w4a16/w8a16)]
+quant_dtype: w8a8 # (str) RKNN: quantize data type, choices=[w8a8 (except for RK2118), w4a16 (only for RK3576/RV1126B), w8a16 (only for RK3562), w4a8 (not support), w16a16i (only for RV1103/RV1106), w16a16i_dfp (only for RV1103/RV1106)]
+quant_method: channel # (str) RKNN: quantize method, choices=[channel, layer, group32/64/128/256 (only when quantized_dtype=w4a16)]
 
 # Hyperparameters ------------------------------------------------------------------------------------------------------
 lr0: 0.01 # (float) initial learning rate (SGD=1e-2, Adam/AdamW=1e-3)
