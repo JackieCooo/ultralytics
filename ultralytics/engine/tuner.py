@@ -429,13 +429,13 @@ class Tuner:
             x = np.loadtxt(self.tune_csv, ndmin=2, delimiter=",", skiprows=1)
             fitness = x[:, 0]  # first column
             best_idx = fitness.argmax()
-            best_is_current = best_idx == (i - start)
+            best_is_current = best_idx == i
             if best_is_current:
                 best_save_dir = str(save_dir)
                 best_metrics = {k: round(v, 5) for k, v in metrics.items()}
                 for ckpt in weights_dir.glob("*.pt"):
                     shutil.copy2(ckpt, self.tune_dir / "weights")
-            elif cleanup:
+            elif cleanup and best_save_dir:
                 shutil.rmtree(best_save_dir, ignore_errors=True)  # remove iteration dirs to reduce storage space
 
             # Plot tune results
